@@ -32,3 +32,8 @@ def test_delivery_normal():
 
 def test_order_total():
     assert order_total(100, 1, 10) == 100
+
+
+def test_invalid_discount():
+    with pytest.raises(ValueError):
+        apply_discount(100, 120)
