@@ -1,0 +1,76 @@
+name: LR5 - Intermediate Code Coverage
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  advanced-coverage:
+    name: Python Lines 80% and Branches 70%
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run tests and generate coverage reports
+        run: |
+          mkdir -p reports
+          python -m pytest tests/ -v \
+            --cov=app \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=html:reports/htmlcov \
+            --cov-report=xml:reports/coverage.xml \
+            --cov-report=lcov:reports/coverage.lcov \
+            --cov-report=json:reports/coverage.json
+
+      - name: Check coverage thresholds
+        run: python scripts/check_coverage.py
+
+      - name: Save coverage metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lr5-coverage-metrics
+          path: reports/metrics.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Generate coverage trend
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python scripts/coverage_trend.py
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lr5-advanced-coverage-reports
+          path: |
+            reports/htmlcov/
+            reports/coverage.xml
+            reports/coverage.lcov
+            reports/coverage.json
+            reports/metrics.json
+            reports/coverage-history.csv
+          if-no-files-found: warn
+          retention-days: 30
