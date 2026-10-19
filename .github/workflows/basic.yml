@@ -32,7 +32,6 @@ jobs:
         run: |
           mkdir -p reports
           python -m pytest tests/ -v \
-            -k test_calculate_total \
             --cov=app \
             --cov-report=term-missing \
             --cov-report=html:reports/htmlcov \
