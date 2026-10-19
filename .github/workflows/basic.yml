@@ -1,0 +1,43 @@
+name: LR5 - Basic Code Coverage
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: Python Coverage 70%
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Run tests and check coverage
+        run: |
+          mkdir -p reports
+          python -m pytest tests/ -v \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=html:reports/htmlcov \
+            --cov-fail-under=70
+      - name: Publish coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lr5-basic-html-coverage
+          path: reports/htmlcov/
+          if-no-files-found: warn
+          retention-days: 14
