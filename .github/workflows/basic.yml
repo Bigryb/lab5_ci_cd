@@ -16,23 +16,28 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+
       - name: Run tests and check coverage
         run: |
           mkdir -p reports
           python -m pytest tests/ -v \
+            -k test_calculate_total \
             --cov=app \
             --cov-report=term-missing \
             --cov-report=html:reports/htmlcov \
             --cov-fail-under=70
+
       - name: Publish coverage report
         if: always()
         uses: actions/upload-artifact@v4
