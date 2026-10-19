@@ -1,3 +1,4 @@
+
 import csv
 import json
 import os
@@ -6,13 +7,14 @@ import tempfile
 from pathlib import Path
 
 reports = Path("reports")
-metrics_path = reports / "metrics.json"
+metrics_file = reports / "metrics.json"
 
-if not metrics_path.exists():
-    print("No coverage metrics. Trend was not created.")
-    raise SystemExit(0)
+if not metrics_file.exists():
+    raise SystemExit("No metrics.json found")
 
-current = json.loads(metrics_path.read_text(encoding="utf-8"))
+current = json.loads(
+    metrics_file.read_text(encoding="utf-8")
+)
 
 repository = os.getenv("GITHUB_REPOSITORY", "")
 default_branch = os.getenv("DEFAULT_BRANCH", "main")
@@ -25,85 +27,128 @@ def gh(*args):
         ["gh", *args],
         capture_output=True,
         text=True,
-        timeout=40,
+        timeout=45,
         check=False,
     )
-    if result.returncode:
+
+    if result.returncode != 0:
         raise RuntimeError(
             result.stderr.strip() or "GitHub CLI error"
         )
+
     return result.stdout
 
 
 if repository and os.getenv("GH_TOKEN"):
     try:
         raw = gh(
-            "run", "list",
-            "-R", repository,
-            "--workflow", "02-coverage-advanced.yml",
-            "--branch", default_branch,
-            "--json", "databaseId,createdAt",
-            "--limit", "20",
+            "api",
+            f"repos/{repository}/actions/artifacts"
+            "?name=lr5-coverage-metrics&per_page=100",
         )
 
-        runs = json.loads(raw)
+        artifacts = json.loads(raw).get("artifacts", [])
+
+        print(f"Found metric artifacts: {len(artifacts)}")
+
+        seen_runs = set()
 
         with tempfile.TemporaryDirectory() as temporary:
-            for run in runs:
-                run_id = str(run["databaseId"])
+            for artifact in artifacts:
+                workflow = artifact.get("workflow_run") or {}
+
+                run_id = str(workflow.get("id", ""))
+                branch = workflow.get("head_branch", "")
+
+                if not run_id:
+                    continue
 
                 if run_id == str(current["run_id"]):
                     continue
 
+                if run_id in seen_runs:
+                    continue
+
+                if branch != default_branch:
+                    continue
+
+                if artifact.get("expired", False):
+                    continue
+
                 folder = Path(temporary) / run_id
-                folder.mkdir()
+                folder.mkdir(parents=True, exist_ok=True)
 
                 try:
                     gh(
-                        "run", "download", run_id,
-                        "-R", repository,
-                        "--name", "lr5-coverage-metrics",
-                        "--dir", str(folder),
+                        "run",
+                        "download",
+                        run_id,
+                        "-R",
+                        repository,
+                        "--name",
+                        "lr5-coverage-metrics",
+                        "--dir",
+                        str(folder),
                     )
 
-                    found = list(folder.rglob("metrics.json"))
+                    files = list(folder.rglob("metrics.json"))
 
-                    if not found:
+                    if not files:
+                        print(
+                            f"Run {run_id}: metrics.json missing"
+                        )
                         continue
 
-                    item = json.loads(
-                        found[0].read_text(encoding="utf-8")
+                    data = json.loads(
+                        files[0].read_text(encoding="utf-8")
                     )
-                    previous.append(item)
 
-                    if len(previous) == 6:
+                    previous.append(data)
+                    seen_runs.add(run_id)
+
+                    print(f"Loaded history from run {run_id}")
+
+                    if len(previous) >= 6:
                         break
 
                 except (
                     RuntimeError,
                     OSError,
-                    json.JSONDecodeError
+                    json.JSONDecodeError,
                 ) as error:
-                    print(f"Skipping run {run_id}: {error}")
+                    print(
+                        f"Run {run_id}: download failed: {error}"
+                    )
 
     except (
         RuntimeError,
         OSError,
-        json.JSONDecodeError
+        json.JSONDecodeError,
     ) as error:
-        print(f"Cannot load previous runs: {error}")
+        print(f"History loading error: {error}")
+
+else:
+    print("GitHub token or repository is unavailable")
 
 
 history = list(reversed(previous)) + [current]
 
-reports.mkdir(exist_ok=True)
+print(f"Total runs in history: {len(history)}")
 
+reports.mkdir(parents=True, exist_ok=True)
+
+# Save CSV for Excel
 with (reports / "coverage-history.csv").open(
-    "w", newline="", encoding="utf-8"
+    "w",
+    newline="",
+    encoding="utf-8-sig",
 ) as file:
-    writer = csv.writer(file)
+    writer = csv.writer(file, delimiter=";")
+
     writer.writerow([
-        "run_id", "lines_percent", "branches_percent"
+        "run_id",
+        "lines_percent",
+        "branches_percent",
     ])
 
     for item in history:
@@ -144,17 +189,16 @@ for item in history:
 
     lines.append(
         f"| {name} | `{bar(item['lines'])}` "
-        f"{item['lines']:.2f}%"
-        f" | `{bar(item['branches'])}` "
+        f"{item['lines']:.2f}% | "
+        f"`{bar(item['branches'])}` "
         f"{item['branches']:.2f}% |"
     )
 
 if len(history) == 1:
-    lines.extend([
-        "",
-        "History will appear after the next workflow run "
-        "on the default branch.",
-    ])
+    lines.append("")
+    lines.append(
+        "No previous coverage artifacts were found."
+    )
 
 summary = "\n".join(lines) + "\n"
 
